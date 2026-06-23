@@ -1,0 +1,89 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env
+
+# Tests / coverage
+.tox/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+htmlcov/
+.hypothesis/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Models (téléchargés à la demande, gros fichiers)
+models/whisper/
+models/nllb/
+models/piper/
+models/**/*.onnx
+models/**/*.bin
+models/**/*.safetensors
+models/**/*.pt
+
+# Logs
+logs/*.log
+*.log
+
+# Audio temporaires
+*.wav
+*.mp3
+*.tmp
+*.tmpaudio
+
+# Documentation build
+docs/_build/
+
+# Cache HuggingFace
+.cache/
+~/.cache/huggingface/
+
+# Configuration locale (peut contenir des chemins absolus)
+config/local.yaml
+config/*.local.yaml
+
+# Type checking
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/

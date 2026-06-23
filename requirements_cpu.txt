@@ -1,0 +1,9 @@
+# Dépendances izvox version CPU only
+# Installation:
+#   pip install -r requirements_cpu.txt
+#   pip install -r requirements.txt
+#
+# Note: utilisez le profil cpu_only pour des performances optimales sur CPU.
+
+torch>=2.0.0+cpu
+torchaudio>=2.0.0+cpu

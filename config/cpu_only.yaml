@@ -1,0 +1,58 @@
+# Profil CPU ONLY
+# Cible: pas de GPU dédié
+# Latence attendue: ~1500ms (utilisez un modèle plus léger si nécessaire)
+
+profile: cpu_only
+hardware_level: cpu_only
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 2048
+  format: int16
+  vad_threshold: 0.02
+  silence_duration: 0.5
+  input_device_pattern: ""
+  output_device_pattern: ""
+  vbcable_input_pattern: "CABLE Input"
+  vbcable_output_pattern: "CABLE-B"
+
+stt:
+  model_size: tiny
+  device: cpu
+  compute_type: int8
+  language: fr
+  beam_size: 1
+  vad_filter: true
+  download_root: ./models/whisper
+
+translation:
+  model_name: Helsinki-NLP/opus-mt-fr-en
+  device: cpu
+  source_lang: fra_Latn
+  target_lang: eng_Latn
+  max_length: 256
+  num_beams: 3
+  cache_dir: ./models/nllb
+
+tts:
+  model_path: ./models/piper
+  voice_fr: fr_FR-upmc-medium
+  voice_en: en_US-lessac-medium
+  sample_rate: 22050
+
+vad:
+  backend: rms
+  threshold: 0.5
+  rms_threshold: 0.02
+  min_speech_duration: 0.1
+  min_silence_duration: 0.5
+  sample_rate: 16000
+
+models_dir: ./models
+logs_dir: ./logs
+config_dir: ./config
+
+verbose: false
+log_level: INFO
+enable_stats: true

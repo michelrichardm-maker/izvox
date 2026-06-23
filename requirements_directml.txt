@@ -1,0 +1,7 @@
+# Dépendances izvox avec support DirectML (AMD/Intel sur Windows)
+# Installation:
+#   pip install -r requirements_directml.txt
+#   pip install -r requirements.txt
+
+torch>=2.0.0
+torch-directml>=0.2.0

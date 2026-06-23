@@ -1,0 +1,58 @@
+# Profil HIGH PERFORMANCE
+# Cible: RTX 3060+ avec 12GB+ VRAM
+# Latence attendue: ~500ms
+
+profile: high_performance
+hardware_level: high
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_size: 1024
+  format: int16
+  vad_threshold: 0.015
+  silence_duration: 0.5
+  input_device_pattern: ""
+  output_device_pattern: ""
+  vbcable_input_pattern: "CABLE Input"
+  vbcable_output_pattern: "CABLE-B"
+
+stt:
+  model_size: large-v3
+  device: cuda
+  compute_type: float16
+  language: fr
+  beam_size: 5
+  vad_filter: true
+  download_root: ./models/whisper
+
+translation:
+  model_name: facebook/nllb-200-3.3B
+  device: cuda
+  source_lang: fra_Latn
+  target_lang: eng_Latn
+  max_length: 512
+  num_beams: 5
+  cache_dir: ./models/nllb
+
+tts:
+  model_path: ./models/piper
+  voice_fr: fr_FR-upmc-medium
+  voice_en: en_US-lessac-medium
+  sample_rate: 22050
+
+vad:
+  backend: silero
+  threshold: 0.5
+  rms_threshold: 0.015
+  min_speech_duration: 0.1
+  min_silence_duration: 0.5
+  sample_rate: 16000
+
+models_dir: ./models
+logs_dir: ./logs
+config_dir: ./config
+
+verbose: false
+log_level: INFO
+enable_stats: true
