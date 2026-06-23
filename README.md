@@ -2,6 +2,7 @@
 
 > Traduction instantanée **FR ⇄ EN** pour vos visioconférences Teams, Zoom, Meet — **100 % locale**.
 
+[![tests](https://github.com/michelrichardm-maker/izvox/actions/workflows/tests.yml/badge.svg)](https://github.com/michelrichardm-maker/izvox/actions/workflows/tests.yml)
 [![License](https://img.shields.io/github/license/michelrichardm-maker/izvox)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Platform: Windows](https://img.shields.io/badge/platform-Windows-lightgrey.svg)](#prérequis)
