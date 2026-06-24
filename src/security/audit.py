@@ -27,8 +27,10 @@ pas une transcription de la session.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -36,6 +38,7 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 GENESIS_HASH = "0" * 64
+HMAC_ENV_VAR = "IZVOX_AUDIT_KEY"
 
 
 def _canonical_json(payload: Dict[str, Any]) -> str:
@@ -45,9 +48,39 @@ def _canonical_json(payload: Dict[str, Any]) -> str:
     )
 
 
-def _compute_hash(payload: Dict[str, Any], prev_hash: str) -> str:
+def _compute_hash(payload: Dict[str, Any], prev_hash: str,
+                  secret: Optional[bytes] = None) -> str:
+    """Hash chaîné.
+
+    Si `secret` est fourni, calcule HMAC-SHA256(secret, body) au lieu de
+    SHA-256(body). Cela rend le log tamper-PROOF (et plus seulement
+    tamper-evident) : un attaquant qui modifie le fichier ne peut pas
+    recalculer un hash valide sans connaître le secret.
+
+    Le secret peut venir de :
+    - $IZVOX_AUDIT_KEY (chemin de migration le plus simple)
+    - DPAPI (Windows) — TODO Tier 3+
+    - TPM 2.0 PCR-bound key — TODO Tier 3+
+    """
     body = _canonical_json(payload) + "|" + prev_hash
+    if secret:
+        return hmac.new(secret, body.encode("utf-8"), hashlib.sha256).hexdigest()
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _get_audit_secret() -> Optional[bytes]:
+    """Récupère le secret HMAC depuis l'environnement, ou None."""
+    raw = os.environ.get(HMAC_ENV_VAR)
+    if not raw:
+        return None
+    # Le secret doit être assez long pour être robuste.
+    if len(raw) < 16:
+        logger.warning(
+            f"⚠ {HMAC_ENV_VAR} est trop court (<16 chars). "
+            f"HMAC désactivé pour cette session."
+        )
+        return None
+    return raw.encode("utf-8")
 
 
 @dataclass
@@ -82,13 +115,17 @@ class AuditLog:
     """
 
     def __init__(self, path: Optional[Path | str] = None,
-                 timestamp_provider=None) -> None:
+                 timestamp_provider=None,
+                 secret: Optional[bytes] = None) -> None:
         """
         Args:
             path: chemin du fichier JSONL. None = in-memory uniquement.
             timestamp_provider: callable() -> str ISO8601. None = wall clock.
                 Injecté pour les tests (les tests doivent pouvoir être
                 déterministes).
+            secret: clé HMAC. Si None, on lit $IZVOX_AUDIT_KEY. Si vide,
+                fallback sur SHA-256 simple (tamper-evident seulement).
+                Si fourni, le log devient tamper-PROOF (HMAC-SHA256).
         """
         self.path: Optional[Path] = Path(path) if path else None
         self._fh = None
@@ -96,6 +133,7 @@ class AuditLog:
         self._last_hash = GENESIS_HASH
         self._timestamp_provider = timestamp_provider or _default_timestamp
         self._memory: List[AuditEvent] = []
+        self._secret = secret if secret is not None else _get_audit_secret()
 
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,7 +174,9 @@ class AuditLog:
             "event": record.event,
             "data": record.data,
         }
-        record.hash = _compute_hash(payload_for_hash, record.prev_hash)
+        record.hash = _compute_hash(
+            payload_for_hash, record.prev_hash, self._secret
+        )
 
         self._last_hash = record.hash
         self._seq += 1
@@ -174,8 +214,15 @@ class VerificationResult:
     reason: Optional[str] = None
 
 
-def verify_audit_log(path: Path | str) -> VerificationResult:
+def verify_audit_log(path: Path | str,
+                     secret: Optional[bytes] = None) -> VerificationResult:
     """Recalcule la chaîne et vérifie que chaque hash matche.
+
+    Args:
+        path: fichier d'audit JSONL.
+        secret: clé HMAC. Si None, on lit $IZVOX_AUDIT_KEY. Doit matcher
+            celui utilisé à l'écriture, sinon tous les hashes seront
+            invalides (ce qui est le comportement souhaité).
 
     Returns:
         VerificationResult avec ok=True si la chaîne est intacte, sinon
@@ -185,6 +232,7 @@ def verify_audit_log(path: Path | str) -> VerificationResult:
     if not p.exists():
         return VerificationResult(ok=False, events_seen=0, reason="file missing")
 
+    used_secret = secret if secret is not None else _get_audit_secret()
     expected_prev = GENESIS_HASH
     seen = 0
     with p.open("r", encoding="utf-8") as f:
@@ -212,12 +260,16 @@ def verify_audit_log(path: Path | str) -> VerificationResult:
                 "event": record.get("event"),
                 "data": record.get("data") or {},
             }
-            computed = _compute_hash(payload, record["prev_hash"])
-            if computed != record.get("hash"):
+            computed = _compute_hash(payload, record["prev_hash"], used_secret)
+            if not hmac.compare_digest(computed, record.get("hash") or ""):
                 return VerificationResult(
                     ok=False, events_seen=seen,
                     first_invalid_seq=record.get("seq"),
-                    reason="event payload was tampered",
+                    reason=(
+                        "event payload was tampered "
+                        "(or wrong HMAC secret)" if used_secret
+                        else "event payload was tampered"
+                    ),
                 )
 
             expected_prev = record["hash"]

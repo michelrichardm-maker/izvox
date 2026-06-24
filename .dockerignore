@@ -1,0 +1,17 @@
+# Évite de copier des artefacts inutiles ou risqués dans l'image
+.git
+.github
+.venv-test
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+logs/*.log
+samples/*.wav
+docs/
+CLAUDE_CODE_FULL_INSTRUCTIONS.md
+.gitignore

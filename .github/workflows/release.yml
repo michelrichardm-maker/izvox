@@ -1,0 +1,120 @@
+name: release
+
+# Déclenché à la création d'un tag vX.Y.Z. Génère :
+# 1. SOURCES.sha256 (manifest d'intégrité des sources)
+# 2. sbom.json + sbom.xml (CycloneDX)
+# 3. Une release tarball
+# Puis signe le tout en keyless via Sigstore Cosign (OIDC GitHub Actions,
+# pas de clé privée à gérer).
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  # Requis pour Sigstore OIDC keyless
+  id-token: write
+  # Pour créer la release et uploader les artefacts
+  contents: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install cyclonedx-bom pyyaml
+
+      - name: Generate SOURCES.sha256
+        run: python tools/sign_sources.py --output SOURCES.sha256
+
+      - name: Generate SBOM (CycloneDX JSON + XML)
+        run: |
+          python tools/generate_sbom.py --output sbom.json
+          python tools/generate_sbom.py --output sbom.xml --format xml
+
+      - name: Create source tarball
+        run: |
+          VERSION="${GITHUB_REF##*/}"
+          tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
+              --exclude='.venv-test' --exclude='models' \
+              -czf "izvox-${VERSION}.tar.gz" .
+          ls -la "izvox-${VERSION}.tar.gz"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.4.1
+
+      - name: Sign artifacts (keyless via OIDC)
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF##*/}"
+          for f in SOURCES.sha256 sbom.json sbom.xml "izvox-${VERSION}.tar.gz"; do
+            echo "🔏 Signing $f"
+            cosign sign-blob \
+              --yes \
+              --output-signature "${f}.sig" \
+              --output-certificate "${f}.cert" \
+              "$f"
+          done
+
+      - name: Verify signatures
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF##*/}"
+          for f in SOURCES.sha256 sbom.json sbom.xml "izvox-${VERSION}.tar.gz"; do
+            echo "✓ Verifying $f"
+            cosign verify-blob \
+              --certificate "${f}.cert" \
+              --signature "${f}.sig" \
+              --certificate-identity-regexp "^https://github.com/${GITHUB_REPOSITORY}/" \
+              --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+              "$f"
+          done
+
+      - name: Create GitHub release with signed artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            SOURCES.sha256
+            SOURCES.sha256.sig
+            SOURCES.sha256.cert
+            sbom.json
+            sbom.json.sig
+            sbom.json.cert
+            sbom.xml
+            sbom.xml.sig
+            sbom.xml.cert
+            izvox-*.tar.gz
+            izvox-*.tar.gz.sig
+            izvox-*.tar.gz.cert
+          generate_release_notes: true
+          body: |
+            ## 🔒 Signed release
+
+            All artifacts in this release are signed via Sigstore Cosign
+            keyless mode. To verify:
+
+            ```bash
+            cosign verify-blob \
+              --certificate <FILE>.cert \
+              --signature <FILE>.sig \
+              --certificate-identity-regexp '^https://github.com/${{ github.repository }}/' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              <FILE>
+            ```
+
+            See [docs/SECURITY.md](https://github.com/${{ github.repository }}/blob/main/docs/SECURITY.md)
+            for the threat model and verification instructions.

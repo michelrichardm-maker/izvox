@@ -247,11 +247,41 @@ class AudioManager:
 
     def open_loopback_stream(self, config: AudioConfig,
                              device_pattern: str,
-                             stream_id: str = "loopback"):
-        """Ouvre un stream loopback WASAPI."""
+                             stream_id: str = "loopback",
+                             exclusive: bool = False):
+        """Ouvre un stream loopback WASAPI.
+
+        Args:
+            config: configuration audio
+            device_pattern: motif de nom du device loopback
+            stream_id: id interne du stream
+            exclusive: si True, ouvre le device en mode WASAPI exclusif.
+                Avantage zero-trust : empêche d'autres applications de
+                capturer simultanément le même périphérique (anti
+                multi-tenant). Inconvénient : si une autre app utilise
+                déjà le device, l'ouverture échoue.
+
+                Note : tous les drivers ne supportent pas le mode exclusif
+                sur leur sortie loopback. Si l'init échoue, on fallback
+                automatiquement en mode partagé avec un warning.
+        """
         device = self.find_loopback_device(device_pattern)
+
+        host_api_specific_stream_info = None
+        if exclusive:
+            try:
+                host_api_specific_stream_info = self._pa_module.PaWasapiStreamInfo(
+                    flags=self._pa_module.paWinWasapiExclusive,
+                )
+            except Exception as e:  # noqa: BLE001
+                self.logger.warning(
+                    f"Impossible de configurer WASAPI exclusive ({e}), "
+                    f"fallback partagé."
+                )
+                host_api_specific_stream_info = None
+
         try:
-            stream = self.pyaudio.open(
+            open_kwargs = dict(
                 format=self._pa_module.paInt16,
                 channels=config.channels,
                 rate=config.sample_rate,
@@ -259,11 +289,43 @@ class AudioManager:
                 input_device_index=device.index,
                 frames_per_buffer=config.chunk_size,
             )
+            if host_api_specific_stream_info is not None:
+                open_kwargs["input_host_api_specific_stream_info"] = (
+                    host_api_specific_stream_info
+                )
+
+            stream = self.pyaudio.open(**open_kwargs)
             self._streams[stream_id] = stream
-            self.logger.info(f"Stream loopback ouvert: {device.name}")
+            mode = "exclusif" if host_api_specific_stream_info else "partagé"
+            self.logger.info(f"Stream loopback ouvert ({mode}): {device.name}")
             return stream
         except Exception as e:  # noqa: BLE001
-            raise AudioStreamError(f"Erreur ouverture stream loopback: {e}") from e
+            # Fallback : si exclusif échoue (autre app déjà accrochée), on
+            # retente en partagé pour ne pas planter l'app.
+            if exclusive:
+                self.logger.warning(
+                    f"WASAPI exclusif refusé ({e}), retry en mode partagé. "
+                    f"⚠ Le multi-tenant n'est PAS protégé sur ce stream."
+                )
+                try:
+                    stream = self.pyaudio.open(
+                        format=self._pa_module.paInt16,
+                        channels=config.channels,
+                        rate=config.sample_rate,
+                        input=True,
+                        input_device_index=device.index,
+                        frames_per_buffer=config.chunk_size,
+                    )
+                    self._streams[stream_id] = stream
+                    return stream
+                except Exception as e2:  # noqa: BLE001
+                    raise AudioStreamError(
+                        f"Erreur ouverture stream loopback (les deux modes "
+                        f"ont échoué): exclusif={e}, partagé={e2}"
+                    ) from e2
+            raise AudioStreamError(
+                f"Erreur ouverture stream loopback: {e}"
+            ) from e
 
     def close_stream(self, stream_id: str) -> None:
         if stream_id in self._streams:

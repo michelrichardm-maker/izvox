@@ -123,6 +123,7 @@ class TranslationPipeline:
                 config=audio_config,
                 device_pattern=audio_config.vbcable_output_pattern,
                 stream_id=f"{self.direction.value}_in",
+                exclusive=getattr(audio_config, "loopback_exclusive", False),
             )
             self.output_stream = self.audio_manager.open_output_stream(
                 config=audio_config,

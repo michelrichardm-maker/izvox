@@ -45,6 +45,11 @@ class AudioConfig:
     vbcable_input_pattern: str = "CABLE Input"
     vbcable_output_pattern: str = "CABLE-B"
 
+    # Zero-trust Palier 3 : ouvrir le loopback en mode WASAPI exclusif pour
+    # bloquer d'autres apps qui tenteraient de sniffer le même câble.
+    # Fallback automatique en partagé si le driver refuse.
+    loopback_exclusive: bool = False
+
 
 @dataclass
 class STTConfig:

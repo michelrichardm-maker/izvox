@@ -213,17 +213,156 @@ audits supply-chain.
 | `--audit-log FILE` | Active le journal hash-chainé |
 | `--paranoid` (étendu) | Tous les flags ci-dessus + tous ceux du Palier 1 |
 
-## Roadmap Palier 3
+## Palier 3 — Trust roots & sandboxing
 
-- **Élimination de VB-Cable** : capture WASAPI session-level direct sur
-  le process Teams (Windows 10 1903+). Plus de câble multi-tenant.
-- **AppContainer Windows** : sandboxing avec capacités réduites
-- **Docker reproductible** : image distroless avec deps hashées
-- **Signature Cosign** : signe `SOURCES.sha256` + SBOM + release tarball.
-  Permet une vérification *réelle* hors-bande, et non plus seulement
-  opportuniste.
-- **HMAC sur audit log** : secret persistant côté TPM ou DPAPI pour rendre
-  le log tamper-proof, pas juste tamper-evident.
+### WASAPI exclusive mode (anti multi-tenant CABLE-B)
+
+```yaml
+audio:
+  loopback_exclusive: true
+```
+
+Ouvre le périphérique de loopback en mode WASAPI exclusif : une seule
+application peut y accéder. Empêche un autre process malveillant ou
+EDR de capturer simultanément l'audio Teams via CABLE-B. Si le driver
+refuse l'exclusif, fallback automatique en partagé avec warning.
+
+> **Limite** : ça empêche le sniff par d'autres apps Windows, mais ne
+> protège pas contre un attaquant qui prendrait CABLE-B en exclusif
+> AVANT izvox. Au démarrage, vérifier que izvox a bien obtenu l'exclusif.
+
+### HMAC audit log (tamper-proof, pas juste evident)
+
+```powershell
+$env:IZVOX_AUDIT_KEY = "un-secret-aléatoire-d-au-moins-16-chars"
+python -m src.main --audit-log logs\audit.jsonl
+```
+
+Quand `IZVOX_AUDIT_KEY` est défini (≥16 caractères), chaque événement
+est haché avec HMAC-SHA256(secret, payload + prev_hash) au lieu de
+SHA-256 simple. Un attaquant qui modifie le fichier ne peut plus
+recalculer un hash valide sans connaître le secret.
+
+Vérification : passer le même secret à `verify_audit_log(path, secret=...)`.
+
+> **Limite** : si le secret traîne dans `$env`, il fuit avec n'importe
+> quel core dump du process izvox. Pour une vraie root of trust : stocker
+> dans le TPM/DPAPI (Windows) ou tpm2-tools (Linux). Stubs prêts dans
+> `src/security/audit.py`.
+
+### Process-level WASAPI loopback (élimination de VB-Cable)
+
+**État : stub.** L'API publique est posée dans
+`src/audio_process_capture.py` mais l'implémentation COM/ctypes n'est pas
+finalisée. Quand elle le sera, le pipeline pourra capturer directement
+l'audio Teams sans passer par VB-Cable B :
+
+```yaml
+audio:
+  incoming_source: process     # au lieu de "vbcable"
+  target_process_name: ms-teams
+```
+
+L'API Windows utilisée est `ActivateAudioInterfaceAsync` avec
+`AUDIOCLIENT_ACTIVATION_PARAMS{ActivationType =
+AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK}`. Requiert Windows 10
+build 1903+.
+
+> Voir la docstring complète du module pour la roadmap d'implémentation
+> (wrapper C++ ou bind comtypes).
+
+### Docker reproductible distroless
+
+```bash
+docker build -t izvox:latest .
+docker run --rm \
+  -v $PWD/samples:/app/samples:ro \
+  -v $PWD/out:/app/out \
+  izvox:latest \
+  --input-file /app/samples/sample_fr.wav \
+  --output-file /app/out/en.wav \
+  --paranoid
+```
+
+Image multi-stage :
+- **Builder** : python:3.12-slim (pinné par digest) + espeak-ng + venv
+  avec toutes les deps Python.
+- **Runtime** : `gcr.io/distroless/python3-debian12:nonroot` (pinné par
+  digest). Pas de shell, pas de pip, pas d'apt. Utilisateur non-root.
+  Default args : `--paranoid --no-banner`.
+
+> Utile pour : tests/CI, mode fichier WAV, audits de l'image (cosign +
+> SBOM). **Pas utilisable pour un vrai appel Teams** : pas d'accès audio
+> physique depuis un container Linux.
+
+### AppContainer Windows (sandbox runtime)
+
+```powershell
+.\scripts\run_appcontainer.ps1
+```
+
+Lance izvox dans un job restreint Windows avec :
+- Limites CPU/mémoire
+- Token réduit (DesktopRestricted)
+- Pas d'accès réseau au niveau du token (en plus du `--no-network` Python)
+- `--paranoid` appliqué par défaut
+
+> Le vrai AppContainer (capabilities microphoneCapability,
+> internetClient) requiert `CreateAppContainerProfile` via Win32 API,
+> non exposé en PowerShell pur. Le script actuel fournit la partie
+> Job Object + token. Roadmap : wrapper p/invoke.
+
+### Cosign keyless signing en CI
+
+Workflow `.github/workflows/release.yml` déclenché à chaque tag
+`vX.Y.Z` :
+
+1. Génère `SOURCES.sha256`, `sbom.json`, `sbom.xml`, `izvox-vX.tar.gz`
+2. Signe chaque artefact via Sigstore Cosign keyless (OIDC GitHub
+   Actions, pas de clé privée à gérer)
+3. Vérifie immédiatement les signatures
+4. Crée une GitHub Release avec tous les fichiers `.sig` + `.cert`
+
+Vérification côté utilisateur :
+```bash
+cosign verify-blob \
+  --certificate SOURCES.sha256.cert \
+  --signature SOURCES.sha256.sig \
+  --certificate-identity-regexp '^https://github.com/michelrichardm-maker/izvox/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  SOURCES.sha256
+```
+
+> C'est la **vraie** chaîne de confiance : la signature prouve que
+> l'artefact vient bien d'un workflow GitHub Actions de ce repo, sans
+> qu'il faille faire confiance à une clé manuelle.
+
+## Récap des flags par palier
+
+| Flag | Palier | Effet |
+|------|--------|-------|
+| (défaut) | T1 | Redaction des logs |
+| `--no-redact` | T1 | Affiche le texte clair |
+| `--in-memory` | T1 | Refuse les écritures disque |
+| `--no-network` | T1 | Lockdown egress non-loopback |
+| `--strict-models` | T1 | Refuse les modèles non listés |
+| `--lock-memory` | T2 | Verrouillage mémoire best-effort |
+| `--verify-sources` | T2 | Vérifie SOURCES.sha256 au démarrage |
+| `--audit-log FILE` | T2 | Journal hash-chainé (HMAC si $IZVOX_AUDIT_KEY) |
+| `--paranoid` | T1+T2 | Active tout ce qui précède + log level WARNING |
+| `audio.loopback_exclusive: true` | T3 | WASAPI exclusif sur CABLE-B |
+| `$IZVOX_AUDIT_KEY` (env) | T3 | Bascule audit log en HMAC |
+| `docker run izvox:latest` | T3 | Runtime distroless |
+| `scripts/run_appcontainer.ps1` | T3 | Sandbox Windows |
+| Tag `vX.Y.Z` | T3 | Release signée Cosign |
+
+## Pour aller plus loin (Tier 3.5+)
+
+- Implémentation réelle du process-level WASAPI loopback (wrapper C++)
+- Vraie intégration AppContainer via `CreateAppContainerProfile`
+- HMAC audit secret stocké en TPM 2.0 (Linux: tpm2-tools, Windows: TBS)
+- Reproducible builds bit-à-bit (SOURCE_DATE_EPOCH, etc.)
+- Atestation SLSA niveau 3 sur les artefacts CI
 
 ## Signaler une faille
 
