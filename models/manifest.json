@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "description": "Hashes of izvox-tracked model artifacts. Used to detect tampering or corrupted downloads.",
+  "notes": [
+    "Whisper et NLLB ne sont pas listés ici car gérés par faster-whisper / huggingface_hub qui vérifient leurs propres hashes.",
+    "Les hashes sont calculés sur les fichiers tels que servis par les URLs source (snapshot HuggingFace).",
+    "Pour ajouter une voix : télécharger, calculer sha256sum, ajouter une entrée."
+  ],
+  "artifacts": {
+    "piper/fr_FR-upmc-medium/fr_FR-upmc-medium.onnx": {
+      "sha256": "9abb3800c199148897a9ed64e100d224f3de83579f100044174ad19418f1786f",
+      "size": 76733615,
+      "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx"
+    },
+    "piper/fr_FR-upmc-medium/fr_FR-upmc-medium.onnx.json": {
+      "sha256": "e8636ec15dfd5d72db37a02cb5320a20f2b8d339f2a0e4337da64c58a33a5868",
+      "size": 4996,
+      "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/upmc/medium/fr_FR-upmc-medium.onnx.json"
+    },
+    "piper/en_US-lessac-medium/en_US-lessac-medium.onnx": {
+      "sha256": "5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
+      "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx"
+    },
+    "piper/en_US-lessac-medium/en_US-lessac-medium.onnx.json": {
+      "sha256": "efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0",
+      "source": "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json"
+    }
+  }
+}

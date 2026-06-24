@@ -111,6 +111,12 @@ class AppConfig:
     log_level: str = "INFO"
     enable_stats: bool = True
 
+    # Zero-trust / confidentialité
+    redact_logs: bool = True        # Masque le contenu textuel dans les logs
+    in_memory_only: bool = False    # Refuse tout artefact disque (logs, fichiers WAV)
+    network_lockdown: bool = False  # Bloque l'egress non-loopback après init
+    strict_models: bool = False     # Refuse les modèles non listés dans manifest
+
     @classmethod
     def from_yaml(cls, filepath: str) -> "AppConfig":
         """Charge la configuration depuis un fichier YAML."""
@@ -160,7 +166,10 @@ class AppConfig:
             if path_key in data:
                 setattr(config, path_key, Path(data[path_key]))
 
-        for opt in ("verbose", "log_level", "enable_stats"):
+        for opt in (
+            "verbose", "log_level", "enable_stats",
+            "redact_logs", "in_memory_only", "network_lockdown", "strict_models",
+        ):
             if opt in data:
                 setattr(config, opt, data[opt])
 
@@ -185,6 +194,10 @@ class AppConfig:
             "verbose": self.verbose,
             "log_level": self.log_level,
             "enable_stats": self.enable_stats,
+            "redact_logs": self.redact_logs,
+            "in_memory_only": self.in_memory_only,
+            "network_lockdown": self.network_lockdown,
+            "strict_models": self.strict_models,
         }
 
         with path.open("w", encoding="utf-8") as f:

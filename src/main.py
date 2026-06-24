@@ -68,6 +68,30 @@ def parse_args() -> argparse.Namespace:
         help="N'affiche pas la bannière de démarrage",
     )
 
+    # Zero-trust / confidentialité
+    sec_group = parser.add_argument_group("Zero-trust / confidentialité")
+    sec_group.add_argument(
+        "--no-redact", action="store_true",
+        help="Affiche le contenu textuel des transcripts dans les logs "
+             "(par défaut masqué).",
+    )
+    sec_group.add_argument(
+        "--in-memory", action="store_true",
+        help="Refuse tout écriture disque (logs fichier, WAV input/output).",
+    )
+    sec_group.add_argument(
+        "--no-network", action="store_true",
+        help="Bloque toute connexion non-loopback après chargement des modèles.",
+    )
+    sec_group.add_argument(
+        "--strict-models", action="store_true",
+        help="Refuse de charger les modèles non listés dans models/manifest.json.",
+    )
+    sec_group.add_argument(
+        "--paranoid", action="store_true",
+        help="Active tous les contrôles ci-dessus + log_level WARNING.",
+    )
+
     # Mode fichier WAV : permet de tester le pipeline sans matériel audio
     file_group = parser.add_argument_group("Mode fichier WAV (dev/test)")
     file_group.add_argument(
@@ -98,7 +122,35 @@ async def main() -> None:
     """Fonction principale async."""
     args = parse_args()
 
-    log_level = "DEBUG" if args.verbose else "INFO"
+    # --paranoid implique : --no-network + --in-memory + --strict-models
+    # + redact (déjà par défaut) + log_level WARNING (au lieu de INFO).
+    if args.paranoid:
+        args.no_network = True
+        args.in_memory = True
+        args.strict_models = True
+
+    # --in-memory interdit les écritures disque non-essentielles
+    if args.in_memory:
+        if args.log_file:
+            print(
+                "❌ --in-memory et --log-file sont incompatibles "
+                "(les logs vers fichier sont une fuite disque).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if args.output_file:
+            print(
+                "❌ --in-memory interdit --output-file (création de fichier disque).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+    if args.paranoid:
+        log_level = "WARNING"
+    elif args.verbose:
+        log_level = "DEBUG"
+    else:
+        log_level = "INFO"
     setup_logging(level=log_level, log_file=args.log_file)
     logger = logging.getLogger("izvox")
 
@@ -118,8 +170,23 @@ async def main() -> None:
     else:
         config = AppConfig()
 
+    # Propage les flags zero-trust à la config (la config YAML peut aussi les
+    # définir ; la ligne de commande surcharge si présente).
+    if args.no_redact:
+        config.redact_logs = False
+    if args.in_memory:
+        config.in_memory_only = True
+    if args.no_network:
+        config.network_lockdown = True
+    if args.strict_models:
+        config.strict_models = True
+
     try:
-        model_manager = ModelManager(config, auto_detect=True)
+        model_manager = ModelManager(
+            config,
+            auto_detect=True,
+            strict_models=config.strict_models,
+        )
         model_manager.initialize(verbose=True)
 
         if args.profile:
@@ -128,6 +195,11 @@ async def main() -> None:
     except Exception as e:  # noqa: BLE001
         logger.error(f"❌ Erreur initialisation: {e}")
         sys.exit(1)
+
+    # Lockdown egress APRÈS chargement des modèles (qui peut télécharger).
+    if config.network_lockdown:
+        from .security import lockdown_egress
+        lockdown_egress()
 
     # Mode fichier : court-circuite tout l'audio device et le double pipeline
     if args.input_file:

@@ -13,6 +13,7 @@ from typing import Any, Callable, List, Optional
 
 from .audio_manager import AudioManager
 from .config import AppConfig, FlowDirection
+from .security.redaction import maybe_redact
 from .stt import STTProcessor
 from .translator import TranslatorProcessor
 from .tts import TTSProcessor
@@ -191,8 +192,10 @@ class TranslationPipeline:
         """Traite une transcription complète: traduction + TTS."""
         start_time = time.time()
 
+        redact = getattr(self.config, "redact_logs", True)
         self.logger.info(
-            f"[{self.direction.value}] 📝 {self.source_lang.upper()}: {text}"
+            f"[{self.direction.value}] 📝 "
+            f"{maybe_redact(text, self.source_lang, redact)}"
         )
 
         loop = asyncio.get_running_loop()
@@ -205,7 +208,8 @@ class TranslationPipeline:
         )
 
         self.logger.info(
-            f"[{self.direction.value}] 🔄 {self.target_lang.upper()}: {translation}"
+            f"[{self.direction.value}] 🔄 "
+            f"{maybe_redact(translation, self.target_lang, redact)}"
         )
 
         if self.tts:

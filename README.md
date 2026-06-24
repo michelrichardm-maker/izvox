@@ -66,6 +66,7 @@ python -m src.main --profile high_performance
 - [Guide d'utilisation](docs/USAGE.md)
 - [Configuration avancée](docs/CONFIGURATION.md)
 - [Architecture technique](docs/ARCHITECTURE.md)
+- [🔒 Sécurité et confidentialité](docs/SECURITY.md)
 - [Dépannage](docs/TROUBLESHOOTING.md)
 - [Référence API](docs/API.md)
 - [Setup VB-Cable](scripts/setup_vbcable.md)

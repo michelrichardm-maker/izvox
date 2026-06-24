@@ -38,6 +38,7 @@ import numpy as np
 
 from .config import AppConfig
 from .pipeline import MAX_BUFFER_DURATION_S, PipelineStats
+from .security.redaction import maybe_redact
 from .stt import STTProcessor
 from .translator import TranslatorProcessor
 from .tts import TTSProcessor
@@ -238,7 +239,8 @@ class FilePipeline:
     async def _process_transcript(self, text: str) -> None:
         """Traite une transcription : traduction → TTS → accumulation."""
         start_time = time.time()
-        self.logger.info(f"📝 {self.source_lang.upper()}: {text}")
+        redact = getattr(self.config, "redact_logs", True)
+        self.logger.info(f"📝 {maybe_redact(text, self.source_lang, redact)}")
 
         loop = asyncio.get_running_loop()
         translation = await loop.run_in_executor(
@@ -248,7 +250,7 @@ class FilePipeline:
             self.source_lang,
             self.target_lang,
         )
-        self.logger.info(f"🔄 {self.target_lang.upper()}: {translation}")
+        self.logger.info(f"🔄 {maybe_redact(translation, self.target_lang, redact)}")
 
         if self.tts:
             audio_data = await loop.run_in_executor(

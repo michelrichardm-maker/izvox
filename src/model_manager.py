@@ -14,6 +14,12 @@ from typing import Any, Dict, Optional
 from .config import AppConfig, HardwareLevel
 from .exceptions import ModelDownloadError
 from .hardware_detector import HardwareDetector, HardwareInfo
+from .security import (
+    ManifestMismatchError,
+    UnknownArtifactError,
+    load_manifest,
+    verify_artifact_from_manifest,
+)
 
 
 @dataclass
@@ -86,15 +92,26 @@ class ModelManager:
         },
     }
 
-    def __init__(self, config: AppConfig, auto_detect: bool = True):
+    def __init__(self, config: AppConfig, auto_detect: bool = True,
+                 strict_models: bool = False):
+        """
+        Args:
+            config: configuration de l'app.
+            auto_detect: lance la détection matérielle au constructeur.
+            strict_models: si True, refuse de continuer quand un artefact
+                téléchargé n'est pas listé dans `models/manifest.json`
+                (mode zero-trust strict). Par défaut, un warning suffit.
+        """
         self.config = config
         self.logger = logging.getLogger(__name__)
         self.models_dir = Path(config.models_dir)
         self.models_dir.mkdir(parents=True, exist_ok=True)
+        self.strict_models = strict_models
 
         self.hardware_info: Optional[HardwareInfo] = None
         self.profile: Optional[Dict[str, str]] = None
         self.model_paths = ModelPaths()
+        self._manifest = load_manifest(self.models_dir / "manifest.json")
 
         if auto_detect:
             self._detect_and_configure()
@@ -170,9 +187,40 @@ class ModelManager:
             voice_dir = piper_dir / voice_name
             if not self._check_piper_voice(voice_dir, voice_name):
                 self._download_piper_voice(voice_name, voice_dir)
+            # Vérification d'intégrité post-download (idempotente sur cache)
+            self._verify_piper_voice(voice_name, voice_dir)
 
         self.model_paths.piper_fr = piper_dir / self.config.tts.voice_fr
         self.model_paths.piper_en = piper_dir / self.config.tts.voice_en
+
+    def _verify_piper_voice(self, voice_name: str, voice_dir: Path) -> None:
+        """Vérifie les hashes SHA-256 des fichiers de la voix Piper.
+
+        Si un fichier ne matche pas le manifest, il est supprimé et une
+        erreur est levée. L'utilisateur peut relancer pour re-download
+        proprement.
+
+        En mode `strict_models`, refuse aussi les artefacts inconnus
+        (absents du manifest).
+        """
+        if voice_name not in self.PIPER_VOICES:
+            return  # pas notre URL, pas notre responsabilité
+        for filename in self.PIPER_VOICES[voice_name]["files"]:
+            relpath = f"piper/{voice_name}/{filename}"
+            file_path = voice_dir / filename
+            try:
+                verify_artifact_from_manifest(
+                    file_path, relpath, self._manifest,
+                    strict=self.strict_models,
+                )
+            except ManifestMismatchError as e:
+                self.logger.error(
+                    f"❌ Tampering détecté : {relpath} ({e}). Fichier supprimé."
+                )
+                raise
+            except UnknownArtifactError as e:
+                self.logger.error(f"❌ Artefact non listé : {relpath} ({e})")
+                raise
 
     def _check_piper_voice(self, voice_dir: Path, voice_name: str) -> bool:
         if voice_name not in self.PIPER_VOICES:
