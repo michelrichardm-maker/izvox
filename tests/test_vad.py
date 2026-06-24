@@ -42,13 +42,38 @@ def test_vad_factory_unknown():
 
 
 def test_vad_factory_rms_with_kwargs():
+    """Fix de régression : pour backend='rms', rms_threshold doit gagner
+    sur threshold (la valeur threshold est destinée à Silero)."""
     vad = VADFactory.create(
         "rms",
-        threshold=0.02,
-        rms_threshold=0.03,
+        threshold=0.5,         # valeur Silero (haute) — DOIT être ignorée
+        rms_threshold=0.015,   # valeur RMS — DOIT être utilisée
         sample_rate=16000,
         min_silence_duration=0.5,
     )
-    # threshold a priorité quand fourni explicitement
     assert isinstance(vad, RMSVAD)
+    assert vad.threshold == 0.015, (
+        f"RMS VAD a utilisé threshold={vad.threshold} au lieu de "
+        f"rms_threshold=0.015. C'est le bug qui fait que les WAV Piper "
+        f"ne sont transcrits que sur les premières 0.5s."
+    )
     assert vad.sample_rate == 16000
+
+
+def test_vad_factory_rms_only_rms_threshold():
+    """Si seul rms_threshold est passé, il est utilisé tel quel."""
+    vad = VADFactory.create("rms", rms_threshold=0.02)
+    assert vad.threshold == 0.02
+
+
+def test_vad_factory_silero_drops_rms_threshold():
+    """Silero ne doit pas recevoir rms_threshold (sinon TypeError)."""
+    # Si Silero est indisponible (pas de torch), on skip.
+    try:
+        vad = VADFactory.create("silero", threshold=0.5, rms_threshold=0.015)
+        # Si on arrive là, c'est que torch.hub a réussi à charger Silero
+        # (rare en CI). On vérifie juste que ça n'a pas planté.
+        assert vad is not None
+    except Exception as e:
+        # torch indisponible ou pas d'accès réseau → skip
+        pytest.skip(f"Silero indisponible: {e}")

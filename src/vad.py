@@ -126,18 +126,34 @@ class RMSVAD(BaseVAD):
 
 
 class VADFactory:
-    """Factory pour créer le bon type de VAD selon le backend."""
+    """Factory pour créer le bon type de VAD selon le backend.
+
+    Convention :
+    - `threshold` est le paramètre **Silero** (probabilité 0-1, défaut 0.5)
+    - `rms_threshold` est le paramètre **RMS** (énergie normalisée 0-1,
+      défaut 0.015)
+
+    Le pipeline passe TOUJOURS les deux en kwargs (depuis VADConfig) ; le
+    factory choisit le bon selon le backend. La règle est :
+    - backend="silero" → on garde `threshold`, on jette `rms_threshold`
+    - backend="rms"    → on garde `rms_threshold` (renommé en `threshold`
+      pour matcher la signature de RMSVAD), on jette `threshold` (Silero)
+    """
 
     @staticmethod
     def create(backend: str = "silero", **kwargs) -> BaseVAD:
         backend = backend.lower()
         if backend == "silero":
+            # Silero ignore rms_threshold
+            kwargs.pop("rms_threshold", None)
             return SileroVAD(**kwargs)
         if backend == "rms":
-            # Accepte threshold ou rms_threshold
-            if "rms_threshold" in kwargs and "threshold" not in kwargs:
-                kwargs["threshold"] = kwargs.pop("rms_threshold")
-            else:
-                kwargs.pop("rms_threshold", None)
+            # Fix : on utilise TOUJOURS rms_threshold pour le backend RMS.
+            # L'ancien code laissait passer `threshold` (la valeur Silero,
+            # 0.5) ce qui faisait que RMS VAD ne détectait jamais de parole.
+            rms_threshold = kwargs.pop("rms_threshold", None)
+            kwargs.pop("threshold", None)  # discard la valeur Silero
+            if rms_threshold is not None:
+                kwargs["threshold"] = rms_threshold
             return RMSVAD(**kwargs)
         raise ValueError(f"Backend VAD inconnu: {backend}")
