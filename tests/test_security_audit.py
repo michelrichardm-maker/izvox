@@ -143,6 +143,38 @@ def test_resume_continues_chain(tmp_path):
     assert result.events_seen == 3
 
 
+def test_close_is_idempotent(tmp_path):
+    """close() après close() ne doit pas planter."""
+    log = AuditLog(path=tmp_path / "x.jsonl", timestamp_provider=_ts_provider())
+    log.append("a")
+    log.close()
+    log.close()  # ne doit pas planter
+    assert log.is_closed is True
+
+
+def test_append_after_close_is_noop(tmp_path, caplog):
+    """append() après close() ne plante pas, renvoie un AuditEvent factice
+    (hash=""), et n'écrit rien sur disque."""
+    p = tmp_path / "x.jsonl"
+    log = AuditLog(path=p, timestamp_provider=_ts_provider())
+    log.append("real_event")
+    log.close()
+
+    # On capture les logs debug
+    caplog.set_level("DEBUG", logger="src.security.audit")
+    ev = log.append("after_close_event", {"x": 1})
+
+    # Renvoie un événement factice
+    assert ev.event == "after_close_event"
+    assert ev.hash == ""
+
+    # Aucun écrasement disque
+    content = p.read_text().strip().split("\n")
+    assert len(content) == 1
+    parsed = json.loads(content[0])
+    assert parsed["event"] == "real_event"
+
+
 def test_does_not_log_text_content():
     """L'API n'accepte pas le texte brut au top-level ; tout passe par
     `data`. Vérification documentaire : on s'attend à ce que les callers

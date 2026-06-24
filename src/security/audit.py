@@ -129,6 +129,7 @@ class AuditLog:
         """
         self.path: Optional[Path] = Path(path) if path else None
         self._fh = None
+        self._closed = False
         self._seq = 0
         self._last_hash = GENESIS_HASH
         self._timestamp_provider = timestamp_provider or _default_timestamp
@@ -143,7 +144,14 @@ class AuditLog:
             self._fh = self.path.open("a", encoding="utf-8")
 
     def _resume(self) -> None:
-        """Reprend le compteur et le hash depuis le dernier événement."""
+        """Reprend le compteur et le hash depuis le dernier événement.
+
+        Si un secret HMAC est configuré et qu'il diffère de celui qui a
+        écrit le dernier événement, recalculer son hash donnera une
+        valeur différente : on émet un warning fort. Tout événement
+        appended après aura un prev_hash incohérent et la chaîne sera
+        détectée comme cassée par verify_audit_log().
+        """
         assert self.path is not None
         last_event: Optional[Dict[str, Any]] = None
         with self.path.open("r", encoding="utf-8") as f:
@@ -158,9 +166,54 @@ class AuditLog:
             self._seq = int(last_event.get("seq", -1)) + 1
             self._last_hash = last_event.get("hash", GENESIS_HASH)
 
+            # Sanity check : le hash recalculé du dernier event matche-t-il
+            # avec le secret courant ? Si non, l'opérateur a changé de clé
+            # (ou il n'y avait pas de clé avant) → la chaîne va se casser.
+            payload = {
+                "seq": last_event.get("seq"),
+                "ts": last_event.get("ts"),
+                "event": last_event.get("event"),
+                "data": last_event.get("data") or {},
+            }
+            prev_hash = last_event.get("prev_hash", GENESIS_HASH)
+            recomputed = _compute_hash(payload, prev_hash, self._secret)
+            if recomputed != self._last_hash:
+                if self._secret:
+                    logger.warning(
+                        "⚠ Resume audit : le hash du dernier événement ne "
+                        "matche pas le secret HMAC courant. Soit le secret "
+                        "a changé, soit le log a été écrit sans HMAC. "
+                        "Les prochains événements casseront la chaîne à la "
+                        "vérification — c'est intentionnel."
+                    )
+                else:
+                    logger.warning(
+                        "⚠ Resume audit : le log existant a été écrit avec "
+                        "un secret HMAC qui n'est plus configuré (env "
+                        f"{HMAC_ENV_VAR} absent). La chaîne sera "
+                        "incohérente après reprise."
+                    )
+
     def append(self, event: str, data: Optional[Dict[str, Any]] = None) -> AuditEvent:
         """Ajoute un événement à la chaîne et le persiste si un fichier
-        est configuré."""
+        est configuré.
+
+        Append après close() est un no-op silencieux (debug log), pour
+        que les chemins de cleanup en cascade (ex. `finally:` après un
+        `except` qui a déjà closé) ne crashent pas. On retourne quand
+        même un AuditEvent factice pour ne pas casser les callers qui
+        chaînent.
+        """
+        if self._closed:
+            logger.debug(
+                f"AuditLog.append({event!r}) après close — ignoré silencieusement"
+            )
+            return AuditEvent(
+                seq=self._seq, ts=self._timestamp_provider(),
+                event=event, data=dict(data or {}),
+                prev_hash=self._last_hash, hash="",
+            )
+
         record = AuditEvent(
             seq=self._seq,
             ts=self._timestamp_provider(),
@@ -196,9 +249,15 @@ class AuditLog:
         return self._last_hash
 
     def close(self) -> None:
+        """Ferme le handle fichier. Idempotent : close() après close() est OK."""
         if self._fh:
             self._fh.close()
             self._fh = None
+        self._closed = True
+
+    @property
+    def is_closed(self) -> bool:
+        return self._closed
 
 
 # ---------------------------------------------------------------------------

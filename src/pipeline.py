@@ -126,7 +126,7 @@ class TranslationPipeline:
                 config=audio_config,
                 device_pattern=audio_config.vbcable_output_pattern,
                 stream_id=f"{self.direction.value}_in",
-                exclusive=getattr(audio_config, "loopback_exclusive", False),
+                exclusive=audio_config.loopback_exclusive,
             )
             self.output_stream = self.audio_manager.open_output_stream(
                 config=audio_config,
@@ -194,7 +194,9 @@ class TranslationPipeline:
 
     async def _process_transcript(self, text: str) -> None:
         """Traite une transcription complète: traduction + TTS."""
-        start_time = time.time()
+        # Polish : monotonic au lieu de time.time() pour la latence — évite
+        # de retomber en arrière sur un NTP sync (latences négatives ou nulles).
+        start_time = time.monotonic()
 
         redact = getattr(self.config, "redact_logs", True)
         self.logger.info(
@@ -239,7 +241,7 @@ class TranslationPipeline:
                 except Exception as e:  # noqa: BLE001
                     self.logger.warning(f"Erreur écriture audio: {e}")
 
-        latency_ms = (time.time() - start_time) * 1000
+        latency_ms = (time.monotonic() - start_time) * 1000
         self.stats.update(latency_ms)
 
         self.logger.info(

@@ -96,3 +96,44 @@ def test_short_env_secret_is_rejected(monkeypatch, tmp_path):
     log = AuditLog(path=tmp_path / "a.jsonl", timestamp_provider=_ts(), secret=None)
     # Fallback : pas de HMAC
     assert log._secret is None
+
+
+def test_resume_warns_when_secret_changed(tmp_path, caplog):
+    """Quand on rouvre un log écrit avec un secret différent, l'opérateur
+    doit recevoir un warning fort."""
+    p = tmp_path / "audit.jsonl"
+    log1 = AuditLog(path=p, timestamp_provider=_ts(), secret=SECRET)
+    log1.append("evt_with_secret_A")
+    log1.close()
+
+    # Rouvre avec un AUTRE secret
+    caplog.set_level("WARNING", logger="src.security.audit")
+    log2 = AuditLog(path=p, timestamp_provider=_ts(), secret=OTHER_SECRET)
+    log2.append("evt_with_secret_B")
+    log2.close()
+
+    # Le warning doit mentionner le changement de secret
+    assert any(
+        "secret" in r.message.lower() and "matche pas" in r.message.lower()
+        for r in caplog.records
+    )
+
+
+def test_resume_warns_when_secret_removed(tmp_path, monkeypatch, caplog):
+    """Quand un log écrit avec HMAC est rouvert SANS secret, warning aussi."""
+    p = tmp_path / "audit.jsonl"
+    log1 = AuditLog(path=p, timestamp_provider=_ts(), secret=SECRET)
+    log1.append("evt")
+    log1.close()
+
+    # Pas de secret dans l'env, pas de secret explicite
+    monkeypatch.delenv(HMAC_ENV_VAR, raising=False)
+    caplog.set_level("WARNING", logger="src.security.audit")
+    log2 = AuditLog(path=p, timestamp_provider=_ts(), secret=None)
+
+    # Doit avoir levé un warning
+    assert any(
+        HMAC_ENV_VAR.lower() in r.message.lower() or "secret" in r.message.lower()
+        for r in caplog.records
+    )
+    log2.close()

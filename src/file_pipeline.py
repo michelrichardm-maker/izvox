@@ -181,7 +181,7 @@ class FilePipeline:
             f"   → {len(audio)} samples, {total_duration_s:.2f}s, {sample_rate}Hz"
         )
 
-        start_time = time.time()
+        start_time = time.monotonic()
         chunk_size = self.config.audio.chunk_size
         was_speaking = False
 
@@ -236,12 +236,12 @@ class FilePipeline:
             transcripts=list(self.transcripts),
             stats=self.stats,
             total_audio_duration_s=total_duration_s,
-            total_processing_time_s=time.time() - start_time,
+            total_processing_time_s=time.monotonic() - start_time,
         )
 
     async def _process_transcript(self, text: str) -> None:
         """Traite une transcription : traduction → TTS → accumulation."""
-        start_time = time.time()
+        start_time = time.monotonic()
         redact = getattr(self.config, "redact_logs", True)
         self.logger.info(f"📝 {maybe_redact(text, self.source_lang, redact)}")
 
@@ -269,7 +269,7 @@ class FilePipeline:
                     )
                 self._output_chunks.append(audio_data)
 
-        latency_ms = (time.time() - start_time) * 1000
+        latency_ms = (time.monotonic() - start_time) * 1000
         self.stats.update(latency_ms)
         self.transcripts.append((text, translation, latency_ms))
         self.logger.info(f"⏱ Latence: {latency_ms:.0f}ms")

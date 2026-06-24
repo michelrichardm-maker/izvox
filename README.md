@@ -11,15 +11,19 @@
 
 - ⚡ **Latence ultra-basse** : < 600 ms (profil HIGH)
 - 💰 **100 % gratuit** : aucun API cloud payant, tout en local
-- 🔒 **Privé** : aucune donnée envoyée sur Internet
+- 🔒 **Zero-trust** : redaction des logs par défaut, hash pinning des modèles,
+  egress lockdown, audit log HMAC, releases signées Cosign — voir
+  [docs/SECURITY.md](docs/SECURITY.md)
 - 🎯 **Adaptatif** : détecte automatiquement votre GPU/CPU et ajuste les modèles
 - 🎤 **Bidirectionnel** : votre voix → anglais, leur voix → français, simultanément
+- 🧪 **Mode fichier WAV** : tester tout le pipeline sans matériel audio
+  (`--input-file in.wav --output-file out.wav`)
 
 ## 🚀 Installation rapide
 
 ```powershell
 # 1. Cloner le projet
-git clone https://github.com/user/izvox.git
+git clone https://github.com/michelrichardm-maker/izvox.git
 cd izvox
 
 # 2. Installer VB-Audio Virtual Cable (voir scripts/setup_vbcable.md)
@@ -101,8 +105,27 @@ python -m src.main --input-file samples\sample_fr.wav --output-file out_en.wav
 ## 🧪 Tests
 
 ```powershell
-pip install pytest pytest-asyncio
+# Deps minimum pour les 124 tests lightweight (sans torch/whisper) :
+pip install pytest pytest-asyncio numpy pyyaml scipy soundfile
+
+# Pour exercer les vrais tests Piper, ajouter :
+pip install piper-tts
+python tools\download_models.py --piper-only
+
 pytest tests/ -v
+```
+
+Pour le mode `--paranoid` (refuse les écritures disque, donc PAS d'audit log
+qui en serait une) :
+```powershell
+python -m src.main --paranoid
+```
+
+Pour un mode durci avec audit log HMAC (sans --in-memory) :
+```powershell
+$env:IZVOX_AUDIT_KEY = "un-secret-aleatoire-de-32-caracteres-au-moins"
+python -m src.main --no-network --strict-models --lock-memory `
+                   --verify-sources --audit-log logs\audit.jsonl
 ```
 
 ## 🤝 Contribuer

@@ -4,12 +4,32 @@ Point d'entrée principal de l'application izvox.
 Usage:
     python -m src.main [options]
 
-Options principales:
-    --config FILE      Charge la configuration depuis un fichier YAML
-    --profile NAME     Force un profil (high_performance/balanced/low_resource/cpu_only)
-    --verbose          Active le mode verbeux
-    --log-file FILE    Écrit les logs dans un fichier
-    --list-devices     Affiche les périphériques audio et quitte
+Options générales:
+    --config FILE       Charge la configuration depuis un fichier YAML
+    --profile NAME      Force un profil
+                        (high_performance/balanced/low_resource/cpu_only)
+    --verbose           Active le mode verbeux (DEBUG)
+    --log-file FILE     Écrit les logs dans un fichier
+    --list-devices      Affiche les périphériques audio et quitte
+    --no-banner         Désactive la bannière
+
+Zero-trust (voir docs/SECURITY.md) :
+    --no-redact         Affiche le texte clair (défaut : masqué)
+    --in-memory         Refuse les écritures disque (log-file, output-file,
+                        audit-log)
+    --no-network        Bloque l'egress non-loopback après init des modèles
+    --strict-models     Refuse les modèles non listés dans models/manifest.json
+    --lock-memory       Verrouillage mémoire best-effort (mlockall)
+    --verify-sources    Vérifie SOURCES.sha256 au démarrage
+    --audit-log FILE    Journal hash-chainé (HMAC si $IZVOX_AUDIT_KEY défini)
+    --paranoid          Active tout ce qui précède + log level WARNING.
+                        Incompatible avec --no-redact.
+
+Mode fichier WAV (dev/test sans matériel audio) :
+    --input-file FILE   WAV d'entrée
+    --output-file FILE  WAV de sortie
+    --source-lang LG    Langue source (défaut: fr)
+    --target-lang LG    Langue cible (défaut: en)
 """
 
 import argparse
@@ -382,11 +402,14 @@ async def main() -> None:
             audit.close()
         sys.exit(1)
     finally:
+        # Polish : si le bloc except a déjà fermé l'audit, append() est un
+        # no-op et close() est idempotent — on peut appeler sans risque.
         if audit:
             try:
-                audit.append("shutdown", {"exit_code": 0, "stats": translator.get_stats()})
+                stats = translator.get_stats()
             except Exception:  # noqa: BLE001
-                audit.append("shutdown", {"exit_code": 0})
+                stats = {}
+            audit.append("shutdown", {"exit_code": 0, "stats": stats})
             audit.close()
 
 

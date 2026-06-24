@@ -31,7 +31,7 @@ izvox a besoin de **deux** câbles virtuels. Voir le guide dédié :
 ## 4. Récupérer izvox
 
 ```powershell
-git clone https://github.com/user/izvox.git
+git clone https://github.com/michelrichardm-maker/izvox.git
 cd izvox
 ```
 
