@@ -23,6 +23,10 @@ python -m src.main
 | `--log-file FILE`   | Écrit les logs dans un fichier                                |
 | `--list-devices`    | Affiche tous les périphériques audio et quitte                |
 | `--no-banner`       | Désactive la bannière de démarrage                            |
+| `--input-file FILE` | **Mode fichier** : lit un WAV au lieu du micro                 |
+| `--output-file FILE`| **Mode fichier** : écrit le WAV traduit                        |
+| `--source-lang LG`  | Langue source en mode fichier (défaut: `fr`)                   |
+| `--target-lang LG`  | Langue cible en mode fichier (défaut: `en`)                    |
 
 Exemples :
 
@@ -31,6 +35,32 @@ python -m src.main --profile high_performance
 python -m src.main --config config\custom.yaml --verbose
 python -m src.main --log-file logs\session.log
 ```
+
+## Mode fichier WAV (dev/test sans matériel audio)
+
+Pratique pour valider le pipeline sans Windows, VB-Cable ou Teams. Lit un
+WAV (n'importe quel sample-rate, mono ou stéréo), passe par le même
+pipeline VAD → STT → traduction → TTS, écrit un WAV de sortie.
+
+```bash
+python -m src.main --input-file samples/fr.wav --output-file out_en.wav
+python -m src.main --input-file en.wav --output-file fr.wav \
+                  --source-lang en --target-lang fr
+```
+
+Sortie type :
+```
+📁 Chargement samples/fr.wav
+   → 64000 samples, 4.00s, 16000Hz
+📝 FR: Bonjour, comment allez-vous aujourd'hui ?
+🔄 EN: Hello, how are you today?
+⏱ Latence: 612ms
+📁 out_en.wav écrit (1.43s)
+✓ Mode fichier terminé : 1 phrases, 0.9s de traitement pour 4.0s d'audio (ratio 0.22x)
+```
+
+Ce mode est utilisé en CI pour valider la chaîne complète sans
+dépendances Windows.
 
 ## Configurer Teams / Zoom / Meet
 

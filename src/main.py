@@ -68,6 +68,29 @@ def parse_args() -> argparse.Namespace:
         help="N'affiche pas la bannière de démarrage",
     )
 
+    # Mode fichier WAV : permet de tester le pipeline sans matériel audio
+    file_group = parser.add_argument_group("Mode fichier WAV (dev/test)")
+    file_group.add_argument(
+        "--input-file",
+        type=str, default=None,
+        help="WAV d'entrée (n'importe quel sample-rate, mono/stéréo)",
+    )
+    file_group.add_argument(
+        "--output-file",
+        type=str, default=None,
+        help="WAV de sortie (généré par TTS)",
+    )
+    file_group.add_argument(
+        "--source-lang",
+        type=str, default="fr",
+        help="Langue source en mode fichier (défaut: fr)",
+    )
+    file_group.add_argument(
+        "--target-lang",
+        type=str, default="en",
+        help="Langue cible en mode fichier (défaut: en)",
+    )
+
     return parser.parse_args()
 
 
@@ -105,6 +128,32 @@ async def main() -> None:
     except Exception as e:  # noqa: BLE001
         logger.error(f"❌ Erreur initialisation: {e}")
         sys.exit(1)
+
+    # Mode fichier : court-circuite tout l'audio device et le double pipeline
+    if args.input_file:
+        if not args.output_file:
+            logger.error("--output-file est requis quand --input-file est utilisé")
+            sys.exit(2)
+        from .file_pipeline import FilePipeline
+        file_pipeline = FilePipeline(
+            config=config,
+            input_file=args.input_file,
+            output_file=args.output_file,
+            source_lang=args.source_lang,
+            target_lang=args.target_lang,
+        )
+        try:
+            result = await file_pipeline.run()
+            logger.info(
+                f"✓ Mode fichier terminé : {len(result.transcripts)} phrases, "
+                f"{result.total_processing_time_s:.1f}s de traitement pour "
+                f"{result.total_audio_duration_s:.1f}s d'audio "
+                f"(ratio {result.total_processing_time_s / max(result.total_audio_duration_s, 0.001):.2f}x)"
+            )
+            return
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"❌ Erreur mode fichier: {e}", exc_info=True)
+            sys.exit(1)
 
     translator = BilingualTranslator(config)
 
