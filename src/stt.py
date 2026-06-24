@@ -24,9 +24,22 @@ class STTProcessor:
         text = stt.transcribe()
     """
 
-    def __init__(self, config: STTConfig, min_duration: float = 1.0):
+    def __init__(self, config: STTConfig, min_duration: float = 0.4,
+                 external_vad: bool = True):
+        """
+        Args:
+            config: configuration STT
+            min_duration: durée minimale (s) avant de tenter une transcription.
+                0.4 par défaut pour capter les phrases courtes (« OK »,
+                « D'accord »).
+            external_vad: True si un VAD upstream filtre déjà l'audio
+                (cas du pipeline). Dans ce cas on désactive le VAD interne
+                de Whisper pour éviter un double filtrage qui clippe les
+                débuts/fins de phrase.
+        """
         self.config = config
         self.logger = logging.getLogger(__name__)
+        self.external_vad = external_vad
 
         self.audio_buffer: List[np.ndarray] = []
         self.buffer_duration: float = 0.0
@@ -84,12 +97,17 @@ class STTProcessor:
             audio = np.concatenate(self.audio_buffer)
             audio_float = audio.astype(np.float32) / 32768.0
 
+            # Si un VAD externe a déjà filtré l'audio, on désactive le VAD
+            # interne de Whisper pour éviter un double filtrage qui clippe.
+            use_internal_vad = self.config.vad_filter and not self.external_vad
             segments, _info = self.model.transcribe(
                 audio_float,
                 language=self.config.language,
                 beam_size=self.config.beam_size,
-                vad_filter=self.config.vad_filter,
-                vad_parameters=dict(min_silence_duration_ms=500),
+                vad_filter=use_internal_vad,
+                vad_parameters=(
+                    dict(min_silence_duration_ms=500) if use_internal_vad else None
+                ),
             )
 
             text_parts = [segment.text for segment in segments]

@@ -51,3 +51,31 @@ def test_stt_buffer_clear():
     stt.clear_buffer()
     assert stt.buffer_duration == 0
     assert stt.audio_buffer == []
+
+
+def test_stt_default_min_duration():
+    """Fix B3 : min_duration par défaut doit être 0.4s pour capter les
+    phrases courtes."""
+    config = STTConfig(
+        model_size="tiny", device="cpu", compute_type="int8",
+        beam_size=1, vad_filter=False,
+    )
+    try:
+        stt = STTProcessor(config)
+    except Exception as e:
+        pytest.skip(f"Modèle Whisper indisponible: {e}")
+    assert stt.min_duration == 0.4
+    assert stt.external_vad is True
+
+
+def test_stt_external_vad_flag():
+    """external_vad=False doit garder le VAD interne actif."""
+    config = STTConfig(
+        model_size="tiny", device="cpu", compute_type="int8",
+        beam_size=1, vad_filter=False,
+    )
+    try:
+        stt = STTProcessor(config, external_vad=False)
+    except Exception as e:
+        pytest.skip(f"Modèle Whisper indisponible: {e}")
+    assert stt.external_vad is False

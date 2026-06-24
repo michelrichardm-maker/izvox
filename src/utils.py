@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+
 
 def setup_logging(level: str = "INFO", log_file: Optional[str] = None,
                   use_color: bool = True) -> None:
@@ -103,6 +105,52 @@ def ensure_directory(path: Path) -> Path:
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def resample_pcm(audio_bytes: bytes, src_rate: int, dst_rate: int) -> bytes:
+    """
+    Rééchantillonne du PCM int16 d'un sample-rate vers un autre.
+
+    Préfère scipy.signal.resample_poly (haute qualité) si scipy est
+    installé. Sinon fallback sur np.interp (suffisant pour des
+    différences modérées comme 22050↔16000).
+
+    Args:
+        audio_bytes: PCM mono, dtype int16
+        src_rate: sample-rate d'origine
+        dst_rate: sample-rate cible
+
+    Returns:
+        PCM int16 rééchantillonné (bytes)
+    """
+    if src_rate == dst_rate or not audio_bytes:
+        return audio_bytes
+
+    audio = np.frombuffer(audio_bytes, dtype=np.int16)
+    if audio.size == 0:
+        return audio_bytes
+
+    try:
+        from scipy.signal import resample_poly  # type: ignore
+
+        from math import gcd
+        g = gcd(src_rate, dst_rate)
+        up = dst_rate // g
+        down = src_rate // g
+        resampled = resample_poly(audio.astype(np.float32), up, down)
+    except ImportError:
+        # Fallback: interpolation linéaire
+        duration = audio.size / src_rate
+        new_size = int(round(duration * dst_rate))
+        if new_size <= 0:
+            return b""
+        old_idx = np.arange(audio.size, dtype=np.float64)
+        new_idx = np.linspace(0, audio.size - 1, new_size, dtype=np.float64)
+        resampled = np.interp(new_idx, old_idx, audio.astype(np.float32))
+
+    # Clipping + retour en int16
+    resampled = np.clip(resampled, -32768, 32767).astype(np.int16)
+    return resampled.tobytes()
 
 
 def print_banner() -> None:

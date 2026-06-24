@@ -16,7 +16,12 @@ from .config import AppConfig, FlowDirection
 from .stt import STTProcessor
 from .translator import TranslatorProcessor
 from .tts import TTSProcessor
+from .utils import resample_pcm
 from .vad import BaseVAD, VADFactory
+
+# Garde-fou anti-mémoire : si l'utilisateur parle plus de N secondes sans
+# pause détectable, on flushe quand même pour éviter d'accumuler.
+MAX_BUFFER_DURATION_S = 4.0
 
 
 @dataclass
@@ -87,7 +92,9 @@ class TranslationPipeline:
 
         stt_config = self.config.stt
         stt_config.language = self.source_lang
-        self.stt = STTProcessor(stt_config)
+        # external_vad=True : Silero/RMS filtre déjà en amont, on désactive
+        # le VAD interne de Whisper pour éviter de clipper les phrases.
+        self.stt = STTProcessor(stt_config, external_vad=True)
 
         self.translator = TranslatorProcessor(self.config.translation)
         self.tts = TTSProcessor(self.config.tts, language=self.tts_lang)
@@ -123,10 +130,21 @@ class TranslationPipeline:
             )
 
     async def run(self) -> None:
-        """Boucle principale du pipeline."""
+        """Boucle principale du pipeline.
+
+        Logique de découpe en phrases (fix B2) :
+        - Tant que VAD détecte de la parole : on accumule les chunks dans le
+          buffer STT.
+        - Si on dépasse MAX_BUFFER_DURATION_S sans pause, on flushe quand
+          même (garde-fou anti-mémoire pour les locuteurs « one-shot »).
+        - Sur la transition speech → silence (l'utilisateur vient de
+          s'arrêter), on flushe et on traduit. C'est ça qui rend la latence
+          réactive et empêche les phrases collées.
+        """
         self.is_running = True
         self.logger.info(f"▶ Démarrage pipeline {self.direction.value}")
 
+        was_speaking = False
         try:
             loop = asyncio.get_running_loop()
             while self.is_running:
@@ -139,13 +157,24 @@ class TranslationPipeline:
                         ),
                     )
 
-                    if self.vad.is_speech(audio_chunk):
+                    is_speech_now = self.vad.is_speech(audio_chunk)
+
+                    if is_speech_now:
                         self.stt.add_audio(
                             audio_chunk, self.config.audio.sample_rate
                         )
-                        transcript = self.stt.transcribe(flush=False)
+                        was_speaking = True
+                        # Garde-fou : phrase trop longue sans pause
+                        if self.stt.buffer_duration >= MAX_BUFFER_DURATION_S:
+                            transcript = self.stt.transcribe(flush=True)
+                            if transcript:
+                                await self._process_transcript(transcript)
+                    elif was_speaking:
+                        # Transition parole → silence : c'est la fin d'une phrase
+                        transcript = self.stt.transcribe(flush=True)
                         if transcript:
                             await self._process_transcript(transcript)
+                        was_speaking = False
 
                     await asyncio.sleep(0.001)
                 except asyncio.CancelledError:
@@ -184,6 +213,17 @@ class TranslationPipeline:
                 None, self.tts.synthesize, translation
             )
             if audio_data and self.output_stream:
+                # Fix B1 : Piper sort à 22050 Hz, le stream de sortie est
+                # à 16000 Hz. Sans rééchantillonnage, la voix sortirait
+                # ~26% trop lente.
+                if self.config.tts.sample_rate != self.config.audio.sample_rate:
+                    audio_data = await loop.run_in_executor(
+                        None,
+                        resample_pcm,
+                        audio_data,
+                        self.config.tts.sample_rate,
+                        self.config.audio.sample_rate,
+                    )
                 try:
                     await loop.run_in_executor(
                         None, self.output_stream.write, audio_data
