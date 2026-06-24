@@ -61,6 +61,28 @@ class TTSProcessor:
             self.logger.warning(f"Erreur chargement Piper: {e}")
             self.voice = None
 
+    def _iter_pcm_chunks(self, text: str) -> Generator[bytes, None, None]:
+        """Itère sur les chunks PCM int16 produits par Piper.
+
+        Gère les deux API connues :
+        - piper-tts ≤ 1.2.x : `voice.synthesize_stream_raw(text)` renvoie
+          directement des `bytes`.
+        - piper-tts ≥ 1.3.x : `voice.synthesize(text)` renvoie des objets
+          `AudioChunk` dont l'attribut `audio_int16_bytes` contient le PCM.
+        """
+        if hasattr(self.voice, "synthesize_stream_raw"):
+            yield from self.voice.synthesize_stream_raw(text)
+            return
+        for chunk in self.voice.synthesize(text):
+            audio_bytes = getattr(chunk, "audio_int16_bytes", None)
+            if audio_bytes is None:
+                # Fallback : reconstruit depuis l'array numpy si dispo
+                arr = getattr(chunk, "audio_int16_array", None)
+                if arr is not None:
+                    audio_bytes = arr.tobytes()
+            if audio_bytes:
+                yield audio_bytes
+
     def synthesize(self, text: str) -> Optional[bytes]:
         """Synthétise du texte en audio (int16 PCM)."""
         if not text or not text.strip():
@@ -69,9 +91,7 @@ class TTSProcessor:
             self.logger.warning("TTS non disponible")
             return None
         try:
-            audio_chunks = []
-            for chunk in self.voice.synthesize_stream_raw(text):
-                audio_chunks.append(chunk)
+            audio_chunks = list(self._iter_pcm_chunks(text))
             if not audio_chunks:
                 return None
             return b"".join(audio_chunks)
@@ -84,8 +104,7 @@ class TTSProcessor:
         if not text or not self.voice:
             return
         try:
-            for chunk in self.voice.synthesize_stream_raw(text):
-                yield chunk
+            yield from self._iter_pcm_chunks(text)
         except Exception as e:  # noqa: BLE001
             self.logger.error(f"Erreur streaming TTS: {e}")
 
