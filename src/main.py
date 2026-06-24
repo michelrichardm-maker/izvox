@@ -88,6 +88,21 @@ def parse_args() -> argparse.Namespace:
         help="Refuse de charger les modèles non listés dans models/manifest.json.",
     )
     sec_group.add_argument(
+        "--lock-memory", action="store_true",
+        help="Empêche le swap des pages du process (best-effort, peut "
+             "échouer sans privilège).",
+    )
+    sec_group.add_argument(
+        "--verify-sources", action="store_true",
+        help="Vérifie le manifest SOURCES.sha256 au démarrage. Refuse de "
+             "démarrer si un fichier source a été modifié.",
+    )
+    sec_group.add_argument(
+        "--audit-log", type=str, default=None,
+        help="Active le journal d'audit hash-chainé vers le fichier indiqué "
+             "(format JSONL).",
+    )
+    sec_group.add_argument(
         "--paranoid", action="store_true",
         help="Active tous les contrôles ci-dessus + log_level WARNING.",
     )
@@ -122,12 +137,13 @@ async def main() -> None:
     """Fonction principale async."""
     args = parse_args()
 
-    # --paranoid implique : --no-network + --in-memory + --strict-models
-    # + redact (déjà par défaut) + log_level WARNING (au lieu de INFO).
+    # --paranoid implique tous les contrôles + log_level WARNING.
     if args.paranoid:
         args.no_network = True
         args.in_memory = True
         args.strict_models = True
+        args.lock_memory = True
+        args.verify_sources = True
 
     # --in-memory interdit les écritures disque non-essentielles
     if args.in_memory:
@@ -156,6 +172,51 @@ async def main() -> None:
 
     if not args.no_banner:
         print_banner()
+
+    # Source integrity (avant tout, pour ne pas exécuter un izvox altéré)
+    if args.verify_sources:
+        from pathlib import Path as _Path
+        from .security.integrity import verify_source_integrity
+        sources_manifest = _Path("SOURCES.sha256")
+        if not sources_manifest.exists():
+            logger.error(
+                "❌ --verify-sources demandé mais SOURCES.sha256 absent. "
+                "Lancez `python tools/sign_sources.py` pour le générer."
+            )
+            sys.exit(2)
+        result = verify_source_integrity(_Path("."), sources_manifest)
+        if not result.ok:
+            logger.error(
+                f"❌ Intégrité des sources compromise : "
+                f"{len(result.mismatched)} fichiers modifiés, "
+                f"{len(result.missing)} manquants."
+            )
+            for f in result.mismatched:
+                logger.error(f"   modifié: {f}")
+            for f in result.missing:
+                logger.error(f"   absent : {f}")
+            sys.exit(3)
+        logger.info(f"✓ Intégrité sources OK ({result.total} fichiers vérifiés)")
+
+    # Memory locking (avant chargement des modèles pour couvrir aussi
+    # leurs allocations futures)
+    if args.lock_memory:
+        from .security import lock_process_memory
+        lock_process_memory()
+
+    # Audit log
+    audit = None
+    if args.audit_log:
+        from .security import AuditLog
+        audit = AuditLog(args.audit_log)
+        audit.append("startup", {
+            "version": "2.0.0",
+            "paranoid": args.paranoid,
+            "in_memory": args.in_memory,
+            "no_network": args.no_network,
+            "strict_models": args.strict_models,
+            "lock_memory": args.lock_memory,
+        })
 
     if args.list_devices:
         from .audio_manager import AudioManager
@@ -200,6 +261,15 @@ async def main() -> None:
     if config.network_lockdown:
         from .security import lockdown_egress
         lockdown_egress()
+        if audit:
+            audit.append("network_lockdown", {})
+
+    if audit:
+        audit.append("models_ready", {
+            "stt": config.stt.model_size,
+            "translation": config.translation.model_name,
+            "vad": config.vad.backend,
+        })
 
     # Mode fichier : court-circuite tout l'audio device et le double pipeline
     if args.input_file:
@@ -222,9 +292,20 @@ async def main() -> None:
                 f"{result.total_audio_duration_s:.1f}s d'audio "
                 f"(ratio {result.total_processing_time_s / max(result.total_audio_duration_s, 0.001):.2f}x)"
             )
+            if audit:
+                audit.append("file_pipeline_done", {
+                    "transcripts": len(result.transcripts),
+                    "audio_s": result.total_audio_duration_s,
+                    "processing_s": result.total_processing_time_s,
+                })
+                audit.append("shutdown", {})
+                audit.close()
             return
         except Exception as e:  # noqa: BLE001
             logger.error(f"❌ Erreur mode fichier: {e}", exc_info=True)
+            if audit:
+                audit.append("error", {"phase": "file_pipeline"})
+                audit.close()
             sys.exit(1)
 
     translator = BilingualTranslator(config)
@@ -257,8 +338,20 @@ async def main() -> None:
         await translator.stop()
     except Exception as e:  # noqa: BLE001
         logger.error(f"❌ Erreur fatale: {e}", exc_info=True)
+        if audit:
+            audit.append("error", {"phase": "runtime"})
         await translator.stop()
+        if audit:
+            audit.append("shutdown", {"exit_code": 1})
+            audit.close()
         sys.exit(1)
+    finally:
+        if audit:
+            try:
+                audit.append("shutdown", {"exit_code": 0, "stats": translator.get_stats()})
+            except Exception:  # noqa: BLE001
+                audit.append("shutdown", {"exit_code": 0})
+            audit.close()
 
 
 def run() -> None:

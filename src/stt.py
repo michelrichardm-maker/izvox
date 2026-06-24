@@ -6,12 +6,13 @@ Le modèle est sélectionné automatiquement par ModelManager selon le matériel
 """
 
 import logging
-from typing import List, Optional
+from typing import Optional
 
 import numpy as np
 
 from .config import STTConfig
 from .exceptions import ModelLoadError
+from .security.memory import SecureAudioBuffer
 
 
 class STTProcessor:
@@ -41,7 +42,7 @@ class STTProcessor:
         self.logger = logging.getLogger(__name__)
         self.external_vad = external_vad
 
-        self.audio_buffer: List[np.ndarray] = []
+        self.audio_buffer = SecureAudioBuffer()
         self.buffer_duration: float = 0.0
         self.min_duration: float = min_duration
 
@@ -94,7 +95,8 @@ class STTProcessor:
             return None
 
         try:
-            audio = np.concatenate(self.audio_buffer)
+            audio = self.audio_buffer.concat()
+            assert audio is not None  # garanti par la check `if not self.audio_buffer`
             audio_float = audio.astype(np.float32) / 32768.0
 
             # Si un VAD externe a déjà filtré l'audio, on désactive le VAD
@@ -121,8 +123,16 @@ class STTProcessor:
             return None
 
     def clear_buffer(self) -> None:
-        """Vide le buffer audio."""
-        self.audio_buffer = []
+        """Vide le buffer audio (avec overwrite mémoire des chunks)."""
+        # secure_clear overwrite chaque numpy array avec des zéros AVANT de
+        # libérer la référence. Réduit la fenêtre d'exposition d'un dump
+        # mémoire ou d'un résidu de swap. Best-effort sur les pages stables.
+        self.audio_buffer.secure_clear()
+        # Garde-fou : SecureAudioBuffer remplace `_chunks` par une nouvelle
+        # liste vide ; on n'a pas besoin de réassigner self.audio_buffer.
+        # Mais si quelqu'un assigne directement, on tolère via duck-typing.
+        if not hasattr(self.audio_buffer, "secure_clear"):
+            self.audio_buffer = SecureAudioBuffer()
         self.buffer_duration = 0.0
 
     def set_language(self, language: str) -> None:

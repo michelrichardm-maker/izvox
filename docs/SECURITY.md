@@ -125,14 +125,105 @@ python -m src.main --no-redact     # logs INFO complets
 En production confidentielle, ne **jamais** combiner `--verbose` et un
 contexte où les logs peuvent fuiter (CI, sauvegardes, support).
 
-## Roadmap (Paliers 2 et 3)
+## Palier 2 — Defense in depth
 
-Cette doc couvre le Palier 1. Voir la conversation/issues pour :
+Le Palier 2 ajoute des contrôles à exposition réduite (best-effort sur OS
+non privilégié) et de l'auditabilité post-incident.
 
-- **Palier 2** : memory locking, scrub, audit hash-chainé, integrity
-  manifest des sources, deps hashées, SBOM
-- **Palier 3** : AppContainer Windows, élimination de VB-Cable au profit
-  d'un loopback session-level, Docker reproductible, signature Cosign
+### Memory locking & scrub
+
+| Flag | Effet |
+|------|-------|
+| `--lock-memory` | Tente `mlockall(MCL_CURRENT \| MCL_FUTURE)` (Linux/macOS) ou `SetProcessWorkingSetSize` (Windows). Échec silencieux si pas de privilège. |
+| (automatique) | `STTProcessor.audio_buffer` est un `SecureAudioBuffer` qui overwrite chaque chunk numpy avec des zéros avant de libérer la référence. |
+
+Ces contrôles réduisent la fenêtre d'exposition d'un dump mémoire ou d'un
+résidu de swap. Ils ne sont **pas une garantie hard** : Python peut
+reallouer ailleurs, le GC peut conserver des copies. C'est une bonne
+hygiène, pas une promesse.
+
+### Audit log hash-chainé
+
+```powershell
+python -m src.main --audit-log logs/audit.jsonl
+```
+
+Chaque événement (startup, model_loaded, network_lockdown, models_ready,
+shutdown, error) est écrit en JSONL avec :
+- `seq`: numéro séquentiel
+- `ts`: timestamp ISO8601
+- `event`: type
+- `data`: métadonnées (jamais de contenu textuel)
+- `prev_hash`: hash de l'événement précédent
+- `hash`: SHA-256 de cet événement chaîné
+
+Vérification post-mortem :
+```python
+from src.security.audit import verify_audit_log
+result = verify_audit_log("logs/audit.jsonl")
+assert result.ok, result.reason
+```
+
+**Limite** : tamper-evident, pas tamper-proof. Un attaquant qui contrôle
+le fichier peut réécrire toute la chaîne de zéro. Pour rendre ça
+infalsifiable : checkpointer le `last_hash` ailleurs (Slack, e-mail) OU
+HMAC avec un secret externe → roadmap Tier 3.
+
+### Source integrity manifest
+
+```bash
+# Au moment de la release, on signe les sources :
+python tools/sign_sources.py
+git add SOURCES.sha256 && git commit -m "Sign sources for vX"
+
+# Au runtime, on vérifie :
+python -m src.main --verify-sources
+```
+
+Génère / vérifie `SOURCES.sha256` au format standard sha256sum. Couvre
+tous les `.py`, `.yaml`, `.toml`, `.json`, `.md` sous `src/`, `tests/`,
+`tools/`, `config/`, `scripts/`, `docs/` + fichiers racine. Si un fichier
+est modifié hors release, izvox refuse de démarrer en mode `--paranoid`.
+
+**Limite** : sans signature externe (cosign), un attaquant peut aussi
+regénérer le manifest. C'est de la détection de tampering opportuniste,
+pas une chaîne de confiance complète → roadmap Tier 3.
+
+### SBOM CycloneDX
+
+Généré en CI pour chaque push sur `main` et uploadé comme artefact
+GitHub Actions (90 jours de rétention) :
+
+```bash
+python tools/generate_sbom.py --output sbom.json
+python tools/generate_sbom.py --output sbom.xml --format xml
+```
+
+Utilise `cyclonedx-bom` si présent (SBOM conforme CycloneDX 1.5), sinon
+fallback minimal sur `pip list`. Utile pour répondre rapidement à une
+CVE (chercher version vulnérable dans toutes les releases) et pour
+audits supply-chain.
+
+### Récap des flags Palier 2
+
+| Flag | Active |
+|------|--------|
+| `--lock-memory` | Verrouillage mémoire best-effort |
+| `--verify-sources` | Vérifie `SOURCES.sha256` au démarrage |
+| `--audit-log FILE` | Active le journal hash-chainé |
+| `--paranoid` (étendu) | Tous les flags ci-dessus + tous ceux du Palier 1 |
+
+## Roadmap Palier 3
+
+- **Élimination de VB-Cable** : capture WASAPI session-level direct sur
+  le process Teams (Windows 10 1903+). Plus de câble multi-tenant.
+- **AppContainer Windows** : sandboxing avec capacités réduites
+- **Docker reproductible** : image distroless avec deps hashées
+- **Signature Cosign** : signe `SOURCES.sha256` + SBOM + release tarball.
+  Permet une vérification *réelle* hors-bande, et non plus seulement
+  opportuniste.
+- **HMAC sur audit log** : secret persistant côté TPM ou DPAPI pour rendre
+  le log tamper-proof, pas juste tamper-evident.
 
 ## Signaler une faille
 
