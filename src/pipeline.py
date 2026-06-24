@@ -8,7 +8,7 @@ BilingualTranslator gère les deux pipelines (outgoing/incoming) en parallèle.
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, List, Optional
 
 from .audio_manager import AudioManager
@@ -91,8 +91,11 @@ class TranslationPipeline:
             min_silence_duration=self.config.vad.min_silence_duration,
         )
 
-        stt_config = self.config.stt
-        stt_config.language = self.source_lang
+        # Fix Bug #1 : utiliser dataclasses.replace() pour créer une COPIE de
+        # STTConfig avec la langue spécifique à ce pipeline. Sans ça, les
+        # deux pipelines (outgoing FR et incoming EN) partageraient la même
+        # référence, et l'init du second écraserait la langue du premier.
+        stt_config = replace(self.config.stt, language=self.source_lang)
         # external_vad=True : Silero/RMS filtre déjà en amont, on désactive
         # le VAD interne de Whisper pour éviter de clipper les phrases.
         self.stt = STTProcessor(stt_config, external_vad=True)

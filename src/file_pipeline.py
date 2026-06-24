@@ -36,6 +36,8 @@ from typing import List, Optional
 
 import numpy as np
 
+from dataclasses import replace
+
 from .config import AppConfig
 from .pipeline import MAX_BUFFER_DURATION_S, PipelineStats
 from .security.redaction import maybe_redact
@@ -152,8 +154,9 @@ class FilePipeline:
             )
 
         if self.stt is None:
-            stt_config = self.config.stt
-            stt_config.language = self.source_lang
+            # Fix Bug #1 : COPIE de STTConfig pour ne pas muter la config
+            # partagée (cf. pipeline.py).
+            stt_config = replace(self.config.stt, language=self.source_lang)
             self.stt = STTProcessor(stt_config, external_vad=True)
 
         if self.translator is None:

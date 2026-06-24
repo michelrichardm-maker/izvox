@@ -137,6 +137,15 @@ async def main() -> None:
     """Fonction principale async."""
     args = parse_args()
 
+    # Fix Bug #3 : --paranoid et --no-redact sont contradictoires. On rejette
+    # explicitement plutôt que de laisser l'un gagner silencieusement.
+    if args.paranoid and args.no_redact:
+        print(
+            "❌ --paranoid et --no-redact sont contradictoires.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     # --paranoid implique tous les contrôles + log_level WARNING.
     if args.paranoid:
         args.no_network = True
@@ -157,6 +166,17 @@ async def main() -> None:
         if args.output_file:
             print(
                 "❌ --in-memory interdit --output-file (création de fichier disque).",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        # Fix Bug #4 : --audit-log écrit un journal JSONL sur disque, donc
+        # incompatible avec --in-memory. On rejette pour ne pas violer
+        # silencieusement le contrat "aucun artefact disque".
+        if args.audit_log:
+            print(
+                "❌ --in-memory interdit --audit-log (le journal est un "
+                "artefact disque). Utilisez un audit log en mémoire seulement "
+                "via l'API Python (AuditLog(path=None)) si nécessaire.",
                 file=sys.stderr,
             )
             sys.exit(2)
@@ -242,17 +262,33 @@ async def main() -> None:
     if args.strict_models:
         config.strict_models = True
 
+    # Fix Bug #3 : --paranoid doit FORCER tous les contrôles, même si le YAML
+    # dit l'inverse. Sans cette ligne, `redact_logs: false` dans la config
+    # désactivait silencieusement la redaction en mode paranoïaque.
+    if args.paranoid:
+        config.redact_logs = True
+        config.in_memory_only = True
+        config.network_lockdown = True
+        config.strict_models = True
+
+    # Fix Bug #2 : appliquer le profil utilisateur AVANT ModelManager.
+    # Sans ça, l'auto-détection sélectionne ses propres modèles, on les
+    # télécharge/charge, puis args.profile change juste les strings de
+    # config sans effet runtime.
+    user_forced_profile = bool(args.profile)
+    if user_forced_profile:
+        config.apply_profile(args.profile)
+        logger.info(f"Profil forcé (avant init): {args.profile}")
+
     try:
         model_manager = ModelManager(
             config,
-            auto_detect=True,
+            # Si l'utilisateur a forcé un profil, on désactive l'auto-détection
+            # matérielle qui sinon écraserait son choix.
+            auto_detect=not user_forced_profile,
             strict_models=config.strict_models,
         )
         model_manager.initialize(verbose=True)
-
-        if args.profile:
-            config.apply_profile(args.profile)
-            logger.info(f"Profil forcé: {args.profile}")
     except Exception as e:  # noqa: BLE001
         logger.error(f"❌ Erreur initialisation: {e}")
         sys.exit(1)
