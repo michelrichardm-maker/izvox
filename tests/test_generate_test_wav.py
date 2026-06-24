@@ -53,3 +53,47 @@ def test_missing_voice_returns_nonzero(tmp_path, monkeypatch, capsys):
     assert rc != 0
     out = capsys.readouterr().out
     assert "download_models" in out
+
+
+# -- Test "réel" qui ne tourne que si la voix Piper FR est disponible -----
+
+PIPER_FR_VOICE = "fr_FR-upmc-medium"
+PIPER_FR_ONNX = (
+    ROOT / "models" / "piper" / PIPER_FR_VOICE / f"{PIPER_FR_VOICE}.onnx"
+)
+
+
+def _piper_fr_available() -> bool:
+    if not PIPER_FR_ONNX.exists():
+        return False
+    try:
+        import piper  # type: ignore  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+@pytest.mark.skipif(
+    not _piper_fr_available(),
+    reason="Piper FR voice not downloaded",
+)
+def test_generate_test_wav_real_synthesis(tmp_path):
+    """Si la voix FR est dispo, on génère un VRAI WAV et on vérifie qu'il
+    est lisible (mono int16, durée > 0)."""
+    import generate_test_wav as g
+
+    output = tmp_path / "real.wav"
+    rc = g._synthesize_one(
+        lang="fr",
+        text="Bonjour, ceci est un test de synthèse vocale.",
+        output=output,
+        model_path=str(ROOT / "models" / "piper"),
+    )
+    assert rc == 0
+    assert output.exists()
+
+    import soundfile as sf
+    data, sr = sf.read(str(output), dtype="int16")
+    # Au moins 0.3s d'audio
+    assert sr in (16000, 22050), f"sample-rate inattendu: {sr}"
+    assert data.size > sr * 0.3, f"WAV trop court: {data.size} samples"
