@@ -62,6 +62,38 @@ Sortie type :
 Ce mode est utilisé en CI pour valider la chaîne complète sans
 dépendances Windows.
 
+### Générer un WAV de test avec Piper
+
+Pratique pour avoir un échantillon de référence à passer en
+`--input-file` :
+
+```bash
+# Voix française canonique (vers samples/sample_fr.wav)
+python tools/generate_test_wav.py --lang fr
+
+# Voix anglaise canonique (vers samples/sample_en.wav)
+python tools/generate_test_wav.py --lang en
+
+# Les deux d'un coup
+python tools/generate_test_wav.py --all
+
+# Phrase personnalisée
+python tools/generate_test_wav.py --text "Bonjour mon ami" \
+                                  --output samples/hello.wav --lang fr
+```
+
+Puis :
+```bash
+python -m src.main --input-file samples/sample_fr.wav \
+                   --output-file out_en.wav
+```
+
+Tu peux écouter `out_en.wav` avec n'importe quel lecteur audio pour
+valider la chaîne FR → EN de bout en bout, sans Windows ni VB-Cable.
+
+> Prérequis : les voix Piper doivent être téléchargées
+> (`python tools/download_models.py --piper-only`).
+
 ## Configurer Teams / Zoom / Meet
 
 Avant ou pendant l'appel :

@@ -86,6 +86,15 @@ python tools\audio_diagnostic.py    # Liste les périphériques audio
 python tools\benchmark.py           # Mesure la latence de chaque étape
 python tools\test_translation.py    # REPL de traduction interactif
 python tools\download_models.py     # Pré-télécharge tous les modèles
+python tools\generate_test_wav.py   # Synthétise un WAV de test (Piper FR/EN)
+```
+
+### Valider la chaîne complète sans matériel audio
+
+```powershell
+python tools\generate_test_wav.py --all                              # samples/sample_fr.wav + sample_en.wav
+python -m src.main --input-file samples\sample_fr.wav --output-file out_en.wav
+# Écoute out_en.wav : tu dois entendre la traduction anglaise
 ```
 
 ## 🧪 Tests
