@@ -13,12 +13,18 @@
 
 ## 2. Installer Python 3.10+
 
+Le script `install_windows.bat` **détecte et installe Python automatiquement
+via winget** s'il manque (Windows 10 1809+ ou Windows 11). Tu peux donc passer
+directement à l'étape 5 si tu veux que ça soit géré tout seul.
+
+Sinon, en manuel :
+
 1. Télécharger depuis <https://www.python.org/downloads/windows/>
 2. Lancer l'installeur en cochant **"Add Python to PATH"**
 3. Vérifier dans PowerShell :
    ```powershell
    python --version
-   # Python 3.11.x
+   # Python 3.11.x ou 3.12.x
    ```
 
 ## 3. Installer VB-Audio Virtual Cable (A + B)
@@ -39,15 +45,29 @@ cd izvox
 
 ## 5. Installation automatique (recommandée)
 
+Lance depuis **n'importe quel CWD** (le script se replace tout seul à la racine
+du projet) :
+
 ```powershell
-.\scripts\install_windows.bat
+# Depuis n'importe ou (le script auto-cd a la racine du projet)
+C:\Saas\izvox-main\scripts\install_windows.bat
+
+# Ou la version PowerShell, identique :
+powershell -ExecutionPolicy Bypass -File C:\Saas\izvox-main\scripts\install_windows.ps1
 ```
 
-Ce script :
-1. Crée un environnement virtuel `venv\`
-2. Installe PyTorch avec CUDA 11.8 (fallback CPU si échec)
-3. Installe toutes les dépendances Python
-4. Lance la vérification de l'installation
+Le script :
+1. **Auto-cd** à la racine du projet
+2. **Détecte** `python` ou `py`
+3. **S'il manque**, installe Python 3.12 automatiquement via winget
+4. **Refresh le PATH** dans la session courante
+5. Crée le venv `venv\`
+6. Installe PyTorch avec CUDA 11.8 (fallback CPU si échec)
+7. Installe `requirements.txt`
+8. Lance `setup_check.py`
+
+Si winget est indisponible (vieux Windows 10), le script donne le lien
+python.org avec les instructions précises.
 
 ## 6. Installation manuelle
 

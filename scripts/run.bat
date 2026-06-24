@@ -1,9 +1,12 @@
 @echo off
-REM Lancement rapide d'izvox sous Windows
+REM Lancement rapide d'izvox - peut etre lance depuis n'importe quel CWD.
+
+REM Auto-cd a la racine du projet (parent de scripts/)
+cd /d "%~dp0\.."
 
 if not exist venv\Scripts\activate.bat (
     echo [X] Environnement virtuel non trouve.
-    echo     Lancez d'abord: scripts\install_windows.bat
+    echo     Lance d'abord : scripts\install_windows.bat
     pause
     exit /b 1
 )
